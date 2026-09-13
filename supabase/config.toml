@@ -1,0 +1,23 @@
+[functions.create-principal]
+verify_jwt = true
+
+[functions.create-super-admin]
+verify_jwt = true
+
+[functions.database-backup]
+verify_jwt = true
+
+[functions.database-restore]
+verify_jwt = true
+
+[functions.manage-users]
+verify_jwt = true
+
+[functions.reset-passwords]
+verify_jwt = true
+
+[functions.setup-demo-accounts]
+verify_jwt = false
+
+[functions.update-principal-password]
+verify_jwt = true

@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS idx_lesson_plans_date ON lesson_plans (date);
