@@ -73,7 +73,7 @@ function AppContent() {
       <div className="min-h-screen bg-gradient-to-br from-blue-400 via-blue-300 to-sky-300 flex flex-col items-center justify-center">
         <div className="mb-6">
           <img
-            src={`${import.meta.env.BASE_URL}png.png`}
+            src={`${import.meta.env.BASE_URL}png%20copy.png`}
             alt="Loading"
             className="w-24 h-24 object-contain animate-pulse"
           />

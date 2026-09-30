@@ -28,7 +28,7 @@ export function Login() {
       <div className="bg-green-50 p-8 rounded-xl shadow-lg w-full max-w-md">
         <div className="flex items-center justify-center mb-4">
           <img
-            src={`${import.meta.env.BASE_URL}png.png`}
+            src={`${import.meta.env.BASE_URL}png%20copy.png`}
             alt="Faafu Atoll School Logo"
             className="w-24 h-24 object-contain"
           />

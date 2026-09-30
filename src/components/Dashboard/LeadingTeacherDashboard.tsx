@@ -367,10 +367,18 @@ export function LeadingTeacherDashboard() {
 
       if (updateError) throw updateError;
 
+      // Optimistic update: immediately reflect the change in UI
+      const updatedPlan = { ...selectedPlan, status: 'approved' as const, principal_status: 'pending' };
+      setLessonPlans(prev => prev.map(p => p.id === selectedPlan.id ? updatedPlan : p));
+      setFilteredPlans(prev => prev.map(p => p.id === selectedPlan.id ? updatedPlan : p));
+      setStats(prev => ({ ...prev, pending: Math.max(0, prev.pending - 1), approved: prev.approved + 1 }));
+
       setShowApprovalModal(false);
       setSelectedPlan(null);
       setComments('');
+      // Background refresh for accuracy
       loadData();
+      loadFilteredPlans();
       alert('Lesson plan approved successfully!');
     } catch (error) {
       console.error('Error approving lesson plan:', error);
@@ -389,9 +397,16 @@ export function LeadingTeacherDashboard() {
 
       if (error) throw error;
 
+      // Optimistic update
+      const updatedPlan = { ...selectedPlan, status: 'rejected' as const };
+      setLessonPlans(prev => prev.map(p => p.id === selectedPlan.id ? updatedPlan : p));
+      setFilteredPlans(prev => prev.map(p => p.id === selectedPlan.id ? updatedPlan : p));
+      setStats(prev => ({ ...prev, pending: Math.max(0, prev.pending - 1) }));
+
       setShowApprovalModal(false);
       setSelectedPlan(null);
       loadData();
+      loadFilteredPlans();
     } catch (error) {
       console.error('Error rejecting lesson plan:', error);
       alert('Failed to reject lesson plan');
@@ -438,10 +453,17 @@ export function LeadingTeacherDashboard() {
 
       if (historyError) throw historyError;
 
+      // Optimistic update
+      const updatedPlan = { ...selectedPlan, status: 'draft' as const, revision_requested_by: 'leading_teacher', revision_feedback: revisionFeedback };
+      setLessonPlans(prev => prev.filter(p => p.id !== selectedPlan.id));
+      setFilteredPlans(prev => prev.filter(p => p.id !== selectedPlan.id));
+      setStats(prev => ({ ...prev, pending: Math.max(0, prev.pending - 1) }));
+
       setShowRequestChangesModal(false);
       setSelectedPlan(null);
       setRevisionFeedback('');
       loadData();
+      loadFilteredPlans();
       alert('Changes requested successfully! Teacher will be notified.');
     } catch (error) {
       console.error('Error requesting changes:', error);
