@@ -350,7 +350,7 @@ export function LessonPlanForm({ lessonPlanId, onSuccess, onCancel, isLeadingTea
       <div className="bg-sky-500 text-white p-6 rounded-t-lg">
         <div className="flex items-center justify-center gap-4 mb-3">
           <img
-            src={`${import.meta.env.BASE_URL}school-logo.png`}
+            src={`${import.meta.env.BASE_URL}png.png`}
             alt="Faafu Atoll School Logo"
             className="w-20 h-20 object-contain"
           />
