@@ -37,8 +37,8 @@ export function TeacherDashboard() {
   const [expandedWeeks, setExpandedWeeks] = useState<Set<number>>(new Set());
 
   useEffect(() => {
-    loadLessonPlans();
-  }, []);
+    if (profile?.id) loadLessonPlans();
+  }, [profile?.id]);
 
   useEffect(() => {
     filterLessonPlans();
@@ -83,34 +83,43 @@ export function TeacherDashboard() {
   };
 
   const loadLessonPlans = async () => {
+    if (!profile?.id) return;
+
     try {
       const { data, error } = await supabase
         .from('lesson_plans')
         .select('*')
-        .eq('teacher_id', profile!.id)
+        .eq('teacher_id', profile.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
 
-      let allRevisionHistory: any[] = [];
-      if (data && data.length > 0) {
-        const { data: revisionData } = await supabase
-          .from('revision_history')
-          .select('lesson_plan_id, action_type')
-          .in('lesson_plan_id', data.map(p => p.id));
-        allRevisionHistory = revisionData || [];
+      const planIds = (data || []).map(plan => plan.id);
+      if (planIds.length === 0) {
+        setLessonPlans([]);
+        return;
       }
 
-      const plansWithRevisionCounts = (data || []).map(plan => {
-        const planRevisions = allRevisionHistory.filter(r => r.lesson_plan_id === plan.id);
-        return {
-          ...plan,
-          revision_request_count: planRevisions.filter(r => r.action_type === 'revision_requested').length,
-          revision_completed_count: planRevisions.filter(r => r.action_type === 'revision_completed' || r.action_type === 'resubmitted').length,
-        };
+      const { data: revisionHistory, error: revisionError } = await supabase
+        .from('revision_history')
+        .select('lesson_plan_id, action_type')
+        .in('lesson_plan_id', planIds);
+
+      if (revisionError) throw revisionError;
+
+      const revisionCounts = new Map<string, { requested: number; completed: number }>();
+      (revisionHistory || []).forEach(revision => {
+        const counts = revisionCounts.get(revision.lesson_plan_id) || { requested: 0, completed: 0 };
+        if (revision.action_type === 'revision_requested') counts.requested++;
+        if (revision.action_type === 'revision_completed' || revision.action_type === 'resubmitted') counts.completed++;
+        revisionCounts.set(revision.lesson_plan_id, counts);
       });
 
-      setLessonPlans(plansWithRevisionCounts);
+      setLessonPlans((data || []).map(plan => ({
+        ...plan,
+        revision_request_count: revisionCounts.get(plan.id)?.requested || 0,
+        revision_completed_count: revisionCounts.get(plan.id)?.completed || 0
+      })));
     } catch (error) {
       console.error('Error loading lesson plans:', error);
     } finally {

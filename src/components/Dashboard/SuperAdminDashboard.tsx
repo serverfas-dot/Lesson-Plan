@@ -139,28 +139,18 @@ export function SuperAdminDashboard() {
   const loadUsers = async () => {
     setLoading(true);
     try {
-      const { data: teachersData, error: teachersError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('role', 'teacher')
-        .order('full_name');
+      const [
+        { data: teachersData, error: teachersError },
+        { data: leadingTeachersData, error: ltError },
+        { data: principalsData, error: principalsError }
+      ] = await Promise.all([
+        supabase.from('profiles').select('*').eq('role', 'teacher').order('full_name'),
+        supabase.from('profiles').select('*').eq('role', 'leading_teacher').order('full_name'),
+        supabase.from('profiles').select('*').eq('role', 'principal').order('full_name')
+      ]);
 
       if (teachersError) throw teachersError;
-
-      const { data: leadingTeachersData, error: ltError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('role', 'leading_teacher')
-        .order('full_name');
-
       if (ltError) throw ltError;
-
-      const { data: principalsData, error: principalsError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('role', 'principal')
-        .order('full_name');
-
       if (principalsError) throw principalsError;
 
       setUsers({
@@ -202,7 +192,8 @@ export function SuperAdminDashboard() {
           teacher:teacher_id(full_name, email),
           leading_teacher:leading_teacher_id(full_name)
         `)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(500);
 
       if (error) throw error;
       setLessonPlans(data || []);
@@ -224,8 +215,8 @@ export function SuperAdminDashboard() {
 
       if (error) throw error;
 
+      setLessonPlans(prev => prev.filter(plan => plan.id !== lessonPlanId));
       showNotification('Lesson plan deleted successfully!', 'success');
-      await loadLessonPlans();
     } catch (error) {
       console.error('Error deleting lesson plan:', error);
       showNotification(error instanceof Error ? error.message : 'Failed to delete lesson plan', 'error');

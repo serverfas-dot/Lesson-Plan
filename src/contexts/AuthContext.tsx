@@ -32,11 +32,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         setUser(session?.user ?? null);
-        if (session?.user) {
-          await loadProfile(session.user.id);
-        } else {
-          setLoading(false);
-        }
       } catch (error) {
         console.error('Error initializing auth:', error);
         setLoading(false);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 import { Users, FileText, CheckCircle, Clock, LogOut, Eye, UserPlus, Trash2, XCircle, AlertCircle, ChevronDown, ChevronRight, Folder, FolderOpen, Upload, Edit2, Settings, Calendar, ChevronLeft, BarChart3 } from 'lucide-react';
@@ -8,6 +8,16 @@ import { LessonPlanSummary } from './LessonPlanSummary';
 
 type LessonPlan = Database['public']['Tables']['lesson_plans']['Row'];
 type Profile = Database['public']['Tables']['profiles']['Row'];
+
+const lessonPlanListSelect = `
+  id, teacher_id, leading_teacher_id, title, week, date, duration, lesson_no, class, subject,
+  topic, status, principal_status, submitted_at, approved_at, created_at,
+  revision_requested_by, revision_feedback, revision_requested_at,
+  reflection_objectives_achieved, reflection_activities_effective,
+  reflection_implemented_as_planned, reflection_notes,
+  teacher:profiles!lesson_plans_teacher_id_fkey(id, full_name, email),
+  leading_teacher:profiles!lesson_plans_leading_teacher_id_fkey(id, full_name, email)
+`;
 
 interface LessonPlanWithDetails extends LessonPlan {
   teacher: Profile;
@@ -59,16 +69,23 @@ export function PrincipalDashboard() {
   const [expandedTeachers, setExpandedTeachers] = useState<Set<string>>(new Set());
   const [allWeeklyPlans, setAllWeeklyPlans] = useState<LessonPlanWithDetails[]>([]);
   const [showTeacherReport, setShowTeacherReport] = useState(false);
-
+  const initialPlans = useRef<LessonPlanWithDetails[]>([]);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (profile?.id) loadData();
+  }, [profile?.id]);
 
   // Server-side filtered fetch for All Lesson Plans section
   useEffect(() => {
-    loadFilteredLeadingTeacherPlans();
-  }, [selectedLeadingTeacher, selectedYear, selectedSemester, selectedWeek]);
+    if (loading || initialPlans.current.length === 0) return;
+
+    const hasActiveFilter = selectedLeadingTeacher !== 'all' || selectedYear !== 'all' || selectedSemester !== 'all' || selectedWeek !== 'all';
+    if (hasActiveFilter) {
+      loadFilteredLeadingTeacherPlans();
+    } else {
+      setLeadingTeacherPlans(initialPlans.current);
+    }
+  }, [loading, selectedLeadingTeacher, selectedYear, selectedSemester, selectedWeek]);
 
   // Client-side search filter on the already-fetched set
   useEffect(() => {
@@ -204,11 +221,7 @@ export function PrincipalDashboard() {
 
         supabase
           .from('lesson_plans')
-          .select(`
-            *,
-            teacher:profiles!lesson_plans_teacher_id_fkey(*),
-            leading_teacher:profiles!lesson_plans_leading_teacher_id_fkey(*)
-          `)
+          .select(lessonPlanListSelect)
           .neq('status', 'draft')
           .order('date', { ascending: false })
           .limit(500)
@@ -232,6 +245,9 @@ export function PrincipalDashboard() {
         }),
       }));
 
+      const initialVisiblePlans = (allPlans || []) as LessonPlanWithDetails[];
+      initialPlans.current = initialVisiblePlans;
+      setLeadingTeacherPlans(initialVisiblePlans);
       setGroups(groupsData);
       setAllTeachers([...(leadingTeachers || []), ...(allTeachers || [])]);
     } catch (error) {
@@ -262,11 +278,7 @@ export function PrincipalDashboard() {
     try {
       let query = supabase
         .from('lesson_plans')
-        .select(`
-          *,
-          teacher:profiles!lesson_plans_teacher_id_fkey(*),
-          leading_teacher:profiles!lesson_plans_leading_teacher_id_fkey(*)
-        `)
+        .select(lessonPlanListSelect)
         .neq('status', 'draft');
 
       if (selectedLeadingTeacher !== 'all') {
@@ -482,6 +494,18 @@ export function PrincipalDashboard() {
 
 
 
+  const openPlanDetails = async (plan: LessonPlanWithDetails) => {
+    setSelectedPlan(plan);
+
+    const { data, error } = await supabase
+      .from('lesson_plans')
+      .select(`*, teacher:profiles!lesson_plans_teacher_id_fkey(*), leading_teacher:profiles!lesson_plans_leading_teacher_id_fkey(*)`)
+      .eq('id', plan.id)
+      .maybeSingle();
+
+    if (!error && data) setSelectedPlan(data as LessonPlanWithDetails);
+  };
+
   const handlePrincipalApprove = async () => {
     if (!selectedPlan || !profile) return;
     if (!profile.signature_url) {
@@ -527,8 +551,6 @@ export function PrincipalDashboard() {
       );
 
       alert('Lesson plan approved successfully!');
-
-      loadData();
     } catch (error) {
       console.error('Error approving lesson plan:', error);
       alert('Failed to approve lesson plan');
@@ -560,8 +582,6 @@ export function PrincipalDashboard() {
       );
 
       alert('Lesson plan rejected');
-
-      loadData();
     } catch (error) {
       console.error('Error rejecting lesson plan:', error);
       alert('Failed to reject lesson plan');
@@ -619,8 +639,6 @@ export function PrincipalDashboard() {
       );
 
       alert('Changes requested successfully! Leading Teacher will be notified.');
-
-      loadData();
     } catch (error) {
       console.error('Error requesting changes:', error);
       alert('Failed to request changes');
@@ -922,7 +940,7 @@ export function PrincipalDashboard() {
                 canEdit={true}
                 onEdit={(planId) => {
                   const plan = allPlans.find(p => p.id === planId);
-                  if (plan) setSelectedPlan(plan);
+                  if (plan) openPlanDetails(plan);
                 }}
               />
             )}
@@ -1066,7 +1084,7 @@ export function PrincipalDashboard() {
                                     <div
                                       key={plan.id}
                                       className="bg-white rounded-lg border border-slate-200 p-3 hover:shadow-sm transition cursor-pointer"
-                                      onClick={() => setSelectedPlan(plan)}
+                                      onClick={() => openPlanDetails(plan)}
                                     >
                                       <div className="flex justify-between items-start">
                                         <div className="flex-1">
@@ -1194,7 +1212,7 @@ export function PrincipalDashboard() {
                                               <div
                                                 key={plan.id}
                                                 className="bg-gradient-to-br from-blue-50 to-sky-100 rounded border border-slate-200 p-2 hover:shadow-sm transition cursor-pointer"
-                                                onClick={() => setSelectedPlan(plan)}
+                                                onClick={() => openPlanDetails(plan)}
                                               >
                                                 <div className="flex justify-between items-start">
                                                   <div className="flex-1">
@@ -1295,7 +1313,7 @@ export function PrincipalDashboard() {
                               <div
                                 key={plan.id}
                                 className="p-4 border-b border-slate-200 last:border-b-0 hover:bg-white transition cursor-pointer"
-                                onClick={() => setSelectedPlan(plan)}
+                                onClick={() => openPlanDetails(plan)}
                               >
                                 <div className="flex justify-between items-start mb-2">
                                   <div>
@@ -1375,7 +1393,7 @@ export function PrincipalDashboard() {
                             {ltPlans.filter(p => p.principal_status === 'approved').map(plan => (
                               <div
                                 key={plan.id}
-                                onClick={() => setSelectedPlan(plan)}
+                                onClick={() => openPlanDetails(plan)}
                                 className="p-4 hover:bg-slate-100 cursor-pointer transition border-b border-slate-200 last:border-b-0"
                               >
                                 <div className="flex items-center justify-between">
@@ -1577,7 +1595,7 @@ export function PrincipalDashboard() {
                               <div
                                 key={plan.id}
                                 className="p-4 border-b border-slate-200 last:border-b-0 hover:bg-white transition cursor-pointer"
-                                onClick={() => setSelectedPlan(plan)}
+                                onClick={() => openPlanDetails(plan)}
                               >
                                 <div className="flex justify-between items-start mb-2">
                                   <div className="flex-1">
@@ -1695,7 +1713,7 @@ export function PrincipalDashboard() {
                             <div
                               key={plan.id}
                               className="border border-slate-200 rounded-lg p-4 hover:shadow-md transition cursor-pointer"
-                              onClick={() => setSelectedPlan(plan)}
+                              onClick={() => openPlanDetails(plan)}
                             >
                               <div className="flex justify-between items-start mb-2">
                                 <div>

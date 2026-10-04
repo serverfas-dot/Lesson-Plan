@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
-import { CheckCircle, XCircle, FileText, Users, LogOut, Eye, PenTool, Upload, Download, Printer, UserPlus, Trash2, Plus, AlertCircle, MessageSquare, History, Copy, ChevronDown, ChevronRight, Folder, FolderOpen, BarChart3, Clock } from 'lucide-react';
+import { CheckCircle, XCircle, FileText, Users, LogOut, Eye, PenTool, Upload, Download, Printer, UserPlus, Trash2, Plus, AlertCircle, MessageSquare, History, Copy, ChevronDown, ChevronRight, Folder, FolderOpen, BarChart3 } from 'lucide-react';
 import { Database } from '../../types/database.types';
 import { LessonPlanView } from '../LessonPlan/LessonPlanView';
 import { LessonPlanForm } from '../LessonPlan/LessonPlanForm';
@@ -14,6 +14,15 @@ import { saveAs } from 'file-saver';
 type LessonPlan = Database['public']['Tables']['lesson_plans']['Row'];
 type Profile = Database['public']['Tables']['profiles']['Row'];
 
+const lessonPlanListSelect = `
+  id, teacher_id, leading_teacher_id, title, week, date, duration, lesson_no, class, subject,
+  topic, status, principal_status, submitted_at, approved_at, created_at,
+  revision_requested_by, revision_feedback, revision_requested_at,
+  reflection_objectives_achieved, reflection_activities_effective,
+  reflection_implemented_as_planned, reflection_notes,
+  teacher:profiles!lesson_plans_teacher_id_fkey(id, full_name, email)
+`;
+
 interface LessonPlanWithTeacher extends LessonPlan {
   teacher: Profile;
   revision_request_count?: number;
@@ -25,10 +34,9 @@ export function LeadingTeacherDashboard() {
   const [lessonPlans, setLessonPlans] = useState<LessonPlanWithTeacher[]>([]);
   const [filteredPlans, setFilteredPlans] = useState<LessonPlanWithTeacher[]>([]);
   const [teachers, setTeachers] = useState<Profile[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [filteredLoading, setFilteredLoading] = useState(false);
   const [stats, setStats] = useState({ pending: 0, approved: 0, total: 0 });
   const [teacherIds, setTeacherIds] = useState<string[]>([]);
+  const [isLoadingPlans, setIsLoadingPlans] = useState(true);
   const [selectedPlan, setSelectedPlan] = useState<LessonPlanWithTeacher | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTeacher, setSelectedTeacher] = useState<string>('all');
@@ -56,16 +64,22 @@ export function LeadingTeacherDashboard() {
   const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(new Set());
   const [expandedMyPlanFolders, setExpandedMyPlanFolders] = useState<Set<string>>(new Set());
   const [showSummaryReport, setShowSummaryReport] = useState(false);
-
+  const initialPlans = useRef<LessonPlanWithTeacher[]>([]);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (profile?.id) loadData();
+  }, [profile?.id]);
 
   // Server-side filtered fetch for All Lesson Plans section
   useEffect(() => {
-    if (teacherIds.length === 0) return;
-    loadFilteredPlans();
+    if (teacherIds.length === 0 || initialPlans.current.length === 0) return;
+
+    const hasActiveFilter = selectedTeacher !== 'all' || selectedYear !== 'all' || selectedSemester !== 'all' || selectedWeek !== 'all';
+    if (hasActiveFilter) {
+      loadFilteredPlans();
+    } else {
+      setLessonPlans(initialPlans.current);
+    }
   }, [teacherIds, selectedTeacher, selectedYear, selectedSemester, selectedWeek]);
 
   // Client-side search filter on the already-fetched set
@@ -167,12 +181,15 @@ export function LeadingTeacherDashboard() {
   };
 
   const loadData = async () => {
+    if (!profile?.id) return;
+    setIsLoadingPlans(true);
+
     try {
       const { data: teachersData, error: teachersError } = await supabase
         .from('profiles')
         .select('*')
-        .eq('leading_teacher_id', profile!.id)
-        .neq('id', profile!.id);
+        .eq('leading_teacher_id', profile.id)
+        .neq('id', profile.id);
 
       if (teachersError) throw teachersError;
       setTeachers(teachersData || []);
@@ -184,87 +201,68 @@ export function LeadingTeacherDashboard() {
         setLessonPlans([]);
         setMyLessonPlans([]);
         setStats({ pending: 0, approved: 0, total: 0 });
+        setIsLoadingPlans(false);
         return;
       }
 
-      // Fire-and-forget: sync leading_teacher_id on stale plans (don't block UI)
-      supabase
-        .from('lesson_plans')
-        .update({ leading_teacher_id: profile!.id })
-        .in('teacher_id', tIds)
-        .neq('leading_teacher_id', profile!.id)
-        .then(() => {});
-
-      // Fetch my plans and stats in parallel (All Lesson Plans fetched separately with filters)
-      const [
-        { data: myPlansData, error: myPlansError },
-        { count: pendingCount },
-        { count: approvedCount },
-        { count: totalCount }
-      ] = await Promise.all([
+      const [{ data: myPlansData, error: myPlansError }, { data: assignedPlans, error: assignedPlansError }] = await Promise.all([
         supabase
           .from('lesson_plans')
-          .select(`
-            *,
-            teacher:profiles!lesson_plans_teacher_id_fkey(*)
-          `)
-          .eq('teacher_id', profile!.id)
+          .select(`*, teacher:profiles!lesson_plans_teacher_id_fkey(*)`)
+          .eq('teacher_id', profile.id)
           .eq('created_by_role', 'leading_teacher')
           .order('submitted_at', { ascending: false })
           .limit(100),
         supabase
           .from('lesson_plans')
-          .select('*', { count: 'exact', head: true })
-          .in('teacher_id', tIds)
-          .eq('status', 'submitted'),
-        supabase
-          .from('lesson_plans')
-          .select('*', { count: 'exact', head: true })
-          .in('teacher_id', tIds)
-          .eq('status', 'approved'),
-        supabase
-          .from('lesson_plans')
-          .select('*', { count: 'exact', head: true })
-          .in('teacher_id', tIds)
+          .select(lessonPlanListSelect)
+          .neq('status', 'draft')
+          .order('date', { ascending: false })
+          .limit(500)
       ]);
 
       if (myPlansError) throw myPlansError;
+      if (assignedPlansError) throw assignedPlansError;
 
+      const visiblePlans = (assignedPlans || []) as LessonPlanWithTeacher[];
+      initialPlans.current = visiblePlans;
+      setLessonPlans(visiblePlans);
       setStats({
-        pending: pendingCount || 0,
-        approved: approvedCount || 0,
-        total: totalCount || 0
+        pending: visiblePlans.filter(plan => plan.status === 'submitted').length,
+        approved: visiblePlans.filter(plan => plan.status === 'approved').length,
+        total: visiblePlans.length
       });
 
-      // Fetch revision history only for my plans (All Lesson Plans fetched separately)
-      const allPlanIds = [...(myPlansData || []).map(p => p.id)];
-      if (allPlanIds.length > 0) {
-        const { data: allRevisionHistory } = await supabase
-          .from('revision_history')
-          .select('lesson_plan_id, action_type')
-          .in('lesson_plan_id', allPlanIds);
-
-        const revMap = new Map<string, { requested: number; completed: number }>();
-        (allRevisionHistory || []).forEach(r => {
-          if (!revMap.has(r.lesson_plan_id)) revMap.set(r.lesson_plan_id, { requested: 0, completed: 0 });
-          const entry = revMap.get(r.lesson_plan_id)!;
-          if (r.action_type === 'revision_requested') entry.requested++;
-          if (r.action_type === 'revision_completed' || r.action_type === 'resubmitted') entry.completed++;
-        });
-
-        const addRevCounts = (plan: any) => {
-          const rev = revMap.get(plan.id) || { requested: 0, completed: 0 };
-          return { ...plan, revision_request_count: rev.requested, revision_completed_count: rev.completed };
-        };
-
-        setMyLessonPlans((myPlansData || []).map(addRevCounts) as any);
-      } else {
+      const planIds = (myPlansData || []).map(plan => plan.id);
+      if (planIds.length === 0) {
         setMyLessonPlans([]);
+        return;
       }
+
+      const { data: revisionHistory, error: revisionError } = await supabase
+        .from('revision_history')
+        .select('lesson_plan_id, action_type')
+        .in('lesson_plan_id', planIds);
+
+      if (revisionError) throw revisionError;
+
+      const revisionCounts = new Map<string, { requested: number; completed: number }>();
+      (revisionHistory || []).forEach(revision => {
+        const counts = revisionCounts.get(revision.lesson_plan_id) || { requested: 0, completed: 0 };
+        if (revision.action_type === 'revision_requested') counts.requested++;
+        if (revision.action_type === 'revision_completed' || revision.action_type === 'resubmitted') counts.completed++;
+        revisionCounts.set(revision.lesson_plan_id, counts);
+      });
+
+      setMyLessonPlans((myPlansData || []).map(plan => ({
+        ...plan,
+        revision_request_count: revisionCounts.get(plan.id)?.requested || 0,
+        revision_completed_count: revisionCounts.get(plan.id)?.completed || 0
+      })) as any);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
-      setLoading(false);
+      setIsLoadingPlans(false);
     }
   };
 
@@ -285,15 +283,11 @@ export function LeadingTeacherDashboard() {
   };
 
   const loadFilteredPlans = async () => {
-    setFilteredLoading(true);
+    setIsLoadingPlans(true);
     try {
       let query = supabase
         .from('lesson_plans')
-        .select(`
-          *,
-          teacher:profiles!lesson_plans_teacher_id_fkey(*)
-        `)
-        .in('teacher_id', teacherIds)
+        .select(lessonPlanListSelect)
         .neq('status', 'draft');
 
       if (selectedTeacher !== 'all') {
@@ -326,7 +320,7 @@ export function LeadingTeacherDashboard() {
     } catch (error) {
       console.error('Error loading filtered plans:', error);
     } finally {
-      setFilteredLoading(false);
+      setIsLoadingPlans(false);
     }
   };
 
@@ -335,6 +329,18 @@ export function LeadingTeacherDashboard() {
 
 
 
+
+  const loadPlanDetails = async (plan: LessonPlanWithTeacher) => {
+    setSelectedPlan(plan);
+
+    const { data, error } = await supabase
+      .from('lesson_plans')
+      .select(`*, teacher:profiles!lesson_plans_teacher_id_fkey(*)`)
+      .eq('id', plan.id)
+      .maybeSingle();
+
+    if (!error && data) setSelectedPlan(data as LessonPlanWithTeacher);
+  };
 
   const handleApprove = async () => {
     if (!selectedPlan || !profile) return;
@@ -345,26 +351,21 @@ export function LeadingTeacherDashboard() {
     }
 
     try {
-      const { error: approvalError } = await supabase.from('approvals').upsert({
-        lesson_plan_id: selectedPlan.id,
-        leading_teacher_id: profile.id,
-        leading_teacher_name: profile.full_name,
-        signature_url: profile.signature_url,
-        comments,
-      }, {
-        onConflict: 'lesson_plan_id'
-      });
+      const [{ error: approvalError }, { error: updateError }] = await Promise.all([
+        supabase.from('approvals').upsert({
+          lesson_plan_id: selectedPlan.id,
+          leading_teacher_id: profile.id,
+          leading_teacher_name: profile.full_name,
+          signature_url: profile.signature_url,
+          comments,
+        }, { onConflict: 'lesson_plan_id' }),
+        supabase
+          .from('lesson_plans')
+          .update({ status: 'approved', principal_status: 'pending' })
+          .eq('id', selectedPlan.id)
+      ]);
 
       if (approvalError) throw approvalError;
-
-      const { error: updateError } = await supabase
-        .from('lesson_plans')
-        .update({
-          status: 'approved',
-          principal_status: 'pending'
-        })
-        .eq('id', selectedPlan.id);
-
       if (updateError) throw updateError;
 
       // Optimistic update: immediately reflect the change in UI
@@ -376,9 +377,6 @@ export function LeadingTeacherDashboard() {
       setShowApprovalModal(false);
       setSelectedPlan(null);
       setComments('');
-      // Background refresh for accuracy
-      loadData();
-      loadFilteredPlans();
       alert('Lesson plan approved successfully!');
     } catch (error) {
       console.error('Error approving lesson plan:', error);
@@ -405,8 +403,6 @@ export function LeadingTeacherDashboard() {
 
       setShowApprovalModal(false);
       setSelectedPlan(null);
-      loadData();
-      loadFilteredPlans();
     } catch (error) {
       console.error('Error rejecting lesson plan:', error);
       alert('Failed to reject lesson plan');
@@ -454,7 +450,6 @@ export function LeadingTeacherDashboard() {
       if (historyError) throw historyError;
 
       // Optimistic update
-      const updatedPlan = { ...selectedPlan, status: 'draft' as const, revision_requested_by: 'leading_teacher', revision_feedback: revisionFeedback };
       setLessonPlans(prev => prev.filter(p => p.id !== selectedPlan.id));
       setFilteredPlans(prev => prev.filter(p => p.id !== selectedPlan.id));
       setStats(prev => ({ ...prev, pending: Math.max(0, prev.pending - 1) }));
@@ -462,8 +457,6 @@ export function LeadingTeacherDashboard() {
       setShowRequestChangesModal(false);
       setSelectedPlan(null);
       setRevisionFeedback('');
-      loadData();
-      loadFilteredPlans();
       alert('Changes requested successfully! Teacher will be notified.');
     } catch (error) {
       console.error('Error requesting changes:', error);
@@ -1096,7 +1089,6 @@ export function LeadingTeacherDashboard() {
   };
 
   const submittedPlans = filteredPlans.filter(p => p.status === 'submitted');
-  const approvedPlans = filteredPlans.filter(p => p.status === 'approved');
   // Use server-side stats for the summary cards, fall back to filtered counts for the visible list
 
   const handleFormSuccess = () => {
@@ -1400,7 +1392,7 @@ export function LeadingTeacherDashboard() {
             title="Teacher Lesson Plan Summary"
             subtitle="Monitor and review lesson planning across your teachers."
             canEdit={false}
-            onView={(plan) => setSelectedPlan(plan)}
+            onView={(plan) => loadPlanDetails(plan)}
           />
         )}
 
@@ -1664,7 +1656,7 @@ export function LeadingTeacherDashboard() {
                       </button>
                     )}
                     <button
-                      onClick={() => setSelectedPlan(plan)}
+                      onClick={() => loadPlanDetails(plan)}
                       className="px-3 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition text-sm flex items-center gap-2"
                     >
                       <Eye className="w-4 h-4" />
@@ -1766,7 +1758,7 @@ export function LeadingTeacherDashboard() {
                                     <div
                                       key={plan.id}
                                       className="p-4 border-t border-slate-100 hover:bg-slate-50 transition cursor-pointer"
-                                      onClick={() => setSelectedPlan(plan)}
+                                      onClick={() => loadPlanDetails(plan)}
                                     >
                                       <div className="flex justify-between items-start mb-2">
                                         <div>
@@ -1889,7 +1881,12 @@ export function LeadingTeacherDashboard() {
             </div>
           </div>
 
-          <div className="grid gap-3">
+          {isLoadingPlans && (
+            <div className="bg-white rounded-lg border border-slate-200 p-8 text-center text-slate-600">
+              Loading lesson plans...
+            </div>
+          )}
+          <div className={isLoadingPlans ? 'hidden' : 'grid gap-3'}>
             {teachers.map((teacher) => {
               const teacherPlans = filteredPlans.filter(p => p.teacher_id === teacher.id);
               const isExpanded = expandedTeachers.has(teacher.id);
@@ -2004,7 +2001,7 @@ export function LeadingTeacherDashboard() {
                                     <div
                                       key={plan.id}
                                       className="p-4 border-t border-slate-100 hover:bg-slate-50 transition cursor-pointer"
-                                      onClick={() => setSelectedPlan(plan)}
+                                      onClick={() => loadPlanDetails(plan)}
                                     >
                                       <div className="flex justify-between items-start mb-2">
                                         <div>
