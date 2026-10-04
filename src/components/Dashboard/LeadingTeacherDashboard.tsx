@@ -16,7 +16,7 @@ type Profile = Database['public']['Tables']['profiles']['Row'];
 
 const lessonPlanListSelect = `
   id, teacher_id, leading_teacher_id, title, week, date, duration, lesson_no, class, subject,
-  topic, status, principal_status, submitted_at, approved_at, created_at,
+  topic, status, principal_status, submitted_at, created_at,
   revision_requested_by, revision_feedback, revision_requested_at,
   reflection_objectives_achieved, reflection_activities_effective,
   reflection_implemented_as_planned, reflection_notes,

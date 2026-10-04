@@ -13,7 +13,27 @@ if (!hasRequiredEnvVars) {
   console.error('Please add these environment variables in Netlify dashboard');
 }
 
+const fetchWithTimeout: typeof fetch = async (input, init) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  const requestSignal = init?.signal;
+  const abortRequest = () => controller.abort();
+
+  if (requestSignal) {
+    if (requestSignal.aborted) controller.abort();
+    else requestSignal.addEventListener('abort', abortRequest, { once: true });
+  }
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+    requestSignal?.removeEventListener('abort', abortRequest);
+  }
+};
+
 export const supabase = createClient<Database>(
   supabaseUrl,
-  supabaseAnonKey
+  supabaseAnonKey,
+  { global: { fetch: fetchWithTimeout } }
 );
