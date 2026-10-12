@@ -16,8 +16,5 @@ verify_jwt = true
 [functions.reset-passwords]
 verify_jwt = true
 
-[functions.setup-demo-accounts]
-verify_jwt = false
-
 [functions.update-principal-password]
 verify_jwt = true
