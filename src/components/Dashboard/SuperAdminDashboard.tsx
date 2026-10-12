@@ -784,6 +784,50 @@ export function SuperAdminDashboard() {
     }
   };
 
+  const handlePromoteToLeadingTeacher = async (userId: string, userName: string) => {
+    if (!confirm(`Promote ${userName} to Leading Teacher? Their existing lesson plans will be preserved.`)) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('No session');
+      const allUsers = [...users.teachers, ...users.leadingTeachers, ...users.principals];
+      const userProfile = allUsers.find(u => u.id === userId);
+      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-users`;
+      const response = await fetch(apiUrl, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, full_name: userName, role: 'leading_teacher', leading_teacher_id: null, email: userProfile?.email }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Failed to promote user');
+      showNotification(`${userName} promoted to Leading Teacher`, 'success');
+      await loadUsers();
+    } catch (error) {
+      showNotification(error instanceof Error ? error.message : 'Failed to promote user', 'error');
+    }
+  };
+
+  const handleDowngradeToTeacher = async (userId: string, userName: string) => {
+    if (!confirm(`Downgrade ${userName} to Teacher? Teachers currently assigned to them will become unassigned. All lesson plan data will be kept.`)) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('No session');
+      const allUsers = [...users.teachers, ...users.leadingTeachers, ...users.principals];
+      const userProfile = allUsers.find(u => u.id === userId);
+      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-users`;
+      const response = await fetch(apiUrl, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, full_name: userName, role: 'teacher', leading_teacher_id: null, email: userProfile?.email }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Failed to downgrade user');
+      showNotification(`${userName} downgraded to Teacher`, 'success');
+      await loadUsers();
+    } catch (error) {
+      showNotification(error instanceof Error ? error.message : 'Failed to downgrade user', 'error');
+    }
+  };
+
   const handleDeleteUser = async (userId: string, userName: string) => {
     if (!confirm(`Are you sure you want to delete ${userName}? This action cannot be undone.`)) return;
 
@@ -1044,26 +1088,34 @@ export function SuperAdminDashboard() {
                           <div>
                             <p className="font-medium text-slate-800">{user.full_name}</p>
                             <p className="text-sm text-slate-600">{user.email}</p>
+                            <span className="inline-block mt-1 text-xs font-medium bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full">Leading Teacher</span>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap justify-end">
+                          <button
+                            onClick={() => handleDowngradeToTeacher(user.id, user.full_name)}
+                            className="flex items-center gap-2 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition text-sm"
+                          >
+                            <RefreshCw className="w-4 h-4" />
+                            Downgrade to Teacher
+                          </button>
                           <button
                             onClick={() => openEditUserModal(user)}
-                            className="flex items-center gap-2 px-3 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition"
+                            className="flex items-center gap-2 px-3 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition text-sm"
                           >
                             <Edit2 className="w-4 h-4" />
                             Edit
                           </button>
                           <button
                             onClick={() => openPasswordResetModal(user)}
-                            className="flex items-center gap-2 px-3 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition"
+                            className="flex items-center gap-2 px-3 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition text-sm"
                           >
                             <Key className="w-4 h-4" />
                             Reset Password
                           </button>
                           <button
                             onClick={() => handleDeleteUser(user.id, user.full_name)}
-                            className="flex items-center gap-2 px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition"
+                            className="flex items-center gap-2 px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition text-sm"
                           >
                             <Trash2 className="w-4 h-4" />
                             Delete
@@ -1092,7 +1144,11 @@ export function SuperAdminDashboard() {
                   <p className="text-slate-600 text-center py-8">No teachers found</p>
                 ) : (
                   <div className="grid gap-3">
-                    {users.teachers.map((user) => (
+                    {users.teachers.map((user) => {
+                      const assignedLT = user.leading_teacher_id
+                        ? [...users.leadingTeachers, ...users.principals].find(lt => lt.id === user.leading_teacher_id)
+                        : null;
+                      return (
                       <div key={user.id} className="flex items-center justify-between p-4 bg-gradient-to-br from-blue-50 to-sky-100 rounded-lg">
                         <div className="flex items-center gap-3">
                           <div className="bg-green-600 text-white w-12 h-12 rounded-full flex items-center justify-center font-medium">
@@ -1101,36 +1157,48 @@ export function SuperAdminDashboard() {
                           <div>
                             <p className="font-medium text-slate-800">{user.full_name}</p>
                             <p className="text-sm text-slate-600">{user.email}</p>
-                            {user.leading_teacher_id && (
-                              <p className="text-xs text-slate-500">Assigned to Leading Teacher</p>
+                            {assignedLT ? (
+                              <span className="inline-block mt-1 text-xs font-medium bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+                                Under: {assignedLT.full_name}
+                              </span>
+                            ) : (
+                              <span className="inline-block mt-1 text-xs font-medium bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">Unassigned</span>
                             )}
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap justify-end">
+                          <button
+                            onClick={() => handlePromoteToLeadingTeacher(user.id, user.full_name)}
+                            className="flex items-center gap-2 px-3 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg transition text-sm"
+                          >
+                            <RefreshCw className="w-4 h-4" />
+                            Promote to Leading Teacher
+                          </button>
                           <button
                             onClick={() => openEditUserModal(user)}
-                            className="flex items-center gap-2 px-3 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition"
+                            className="flex items-center gap-2 px-3 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition text-sm"
                           >
                             <Edit2 className="w-4 h-4" />
                             Edit
                           </button>
                           <button
                             onClick={() => openPasswordResetModal(user)}
-                            className="flex items-center gap-2 px-3 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition"
+                            className="flex items-center gap-2 px-3 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition text-sm"
                           >
                             <Key className="w-4 h-4" />
                             Reset Password
                           </button>
                           <button
                             onClick={() => handleDeleteUser(user.id, user.full_name)}
-                            className="flex items-center gap-2 px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition"
+                            className="flex items-center gap-2 px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition text-sm"
                           >
                             <Trash2 className="w-4 h-4" />
                             Delete
                           </button>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

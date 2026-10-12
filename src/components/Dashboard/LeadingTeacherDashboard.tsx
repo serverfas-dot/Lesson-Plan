@@ -216,9 +216,10 @@ export function LeadingTeacherDashboard() {
         supabase
           .from('lesson_plans')
           .select(lessonPlanListSelect)
+          .in('teacher_id', tIds)
           .neq('status', 'draft')
           .order('date', { ascending: false })
-          .limit(500)
+          .limit(2000)
       ]);
 
       if (myPlansError) throw myPlansError;
@@ -288,6 +289,7 @@ export function LeadingTeacherDashboard() {
       let query = supabase
         .from('lesson_plans')
         .select(lessonPlanListSelect)
+        .in('teacher_id', teacherIds)
         .neq('status', 'draft');
 
       if (selectedTeacher !== 'all') {

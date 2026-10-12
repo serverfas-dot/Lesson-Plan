@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
-import { Users, FileText, CheckCircle, Clock, LogOut, Eye, UserPlus, Trash2, XCircle, AlertCircle, ChevronDown, ChevronRight, Folder, FolderOpen, Upload, Edit2, Settings, Calendar, ChevronLeft, BarChart3 } from 'lucide-react';
+import { Users, FileText, CheckCircle, Clock, LogOut, Eye, UserPlus, Trash2, XCircle, AlertCircle, ChevronDown, ChevronRight, Folder, FolderOpen, Upload, Edit2, Settings, Calendar, ChevronLeft, BarChart3, RefreshCw } from 'lucide-react';
 import { Database } from '../../types/database.types';
 import { LessonPlanView } from '../LessonPlan/LessonPlanView';
 import { LessonPlanSummary } from './LessonPlanSummary';
@@ -69,6 +69,7 @@ export function PrincipalDashboard() {
   const [expandedTeachers, setExpandedTeachers] = useState<Set<string>>(new Set());
   const [allWeeklyPlans, setAllWeeklyPlans] = useState<LessonPlanWithDetails[]>([]);
   const [showTeacherReport, setShowTeacherReport] = useState(false);
+  const [teacherToLT, setTeacherToLT] = useState<Map<string, string | null>>(new Map());
   const initialPlans = useRef<LessonPlanWithDetails[]>([]);
 
   useEffect(() => {
@@ -117,8 +118,9 @@ export function PrincipalDashboard() {
   const groupPlansByLeadingTeacher = (plans: LessonPlanWithDetails[]) => {
     const grouped = new Map<string, LessonPlanWithDetails[]>();
     plans.forEach(plan => {
-      // For leading teacher's own plans, leading_teacher_id is NULL, so use teacher_id
-      const leadingTeacherId = plan.leading_teacher_id || plan.teacher_id;
+      // Use the teacher's CURRENT leading_teacher_id from profiles (not the stale column on lesson_plans)
+      const currentLT = teacherToLT.get(plan.teacher_id);
+      const leadingTeacherId = currentLT || plan.teacher_id;
       if (!leadingTeacherId) return;
       if (!grouped.has(leadingTeacherId)) {
         grouped.set(leadingTeacherId, []);
@@ -235,6 +237,7 @@ export function PrincipalDashboard() {
       // from their profile, not the potentially stale leading_teacher_id on the lesson plan
       const teacherToLT = new Map<string, string | null>();
       (allTeachers || []).forEach(t => teacherToLT.set(t.id, t.leading_teacher_id));
+      setTeacherToLT(new Map(teacherToLT));
 
       const groupsData: LeadingTeacherGroup[] = (leadingTeachers || []).map(lt => ({
         leadingTeacher: lt,
@@ -415,7 +418,7 @@ export function PrincipalDashboard() {
     try {
       const { error } = await supabase
         .from('profiles')
-        .update({ role: 'leading_teacher' })
+        .update({ role: 'leading_teacher', leading_teacher_id: null })
         .eq('id', selectedTeacherForPromotion);
 
       if (error) throw error;
@@ -423,10 +426,10 @@ export function PrincipalDashboard() {
       setShowAddLeadingTeacherModal(false);
       setSelectedTeacherForPromotion('');
       await loadData();
-      alert('Leading teacher added successfully!');
+      alert('Teacher promoted to Leading Teacher successfully!');
     } catch (error) {
-      console.error('Error adding leading teacher:', error);
-      alert('Failed to add leading teacher');
+      console.error('Error promoting teacher:', error);
+      alert('Failed to promote teacher');
     }
   };
 
@@ -461,14 +464,10 @@ export function PrincipalDashboard() {
   };
 
   const handleRemoveLeadingTeacher = async (leadingTeacherId: string) => {
-    if (!confirm('Are you sure you want to remove this leading teacher? All their teachers will be unassigned.')) return;
+    if (!confirm('Downgrade this leading teacher to a regular teacher? Their assigned teachers will become unassigned. All lesson plan data will be preserved.')) return;
 
     try {
-      await supabase
-        .from('lesson_plans')
-        .update({ leading_teacher_id: null })
-        .eq('leading_teacher_id', leadingTeacherId);
-
+      // Unassign teachers under this leading teacher (lesson plan records are kept as-is)
       const { error: updateTeachersError } = await supabase
         .from('profiles')
         .update({ leading_teacher_id: null })
@@ -476,18 +475,19 @@ export function PrincipalDashboard() {
 
       if (updateTeachersError) throw updateTeachersError;
 
-      const { error: deleteError } = await supabase
+      // Downgrade the leading teacher's role
+      const { error: roleError } = await supabase
         .from('profiles')
         .update({ role: 'teacher' })
         .eq('id', leadingTeacherId);
 
-      if (deleteError) throw deleteError;
+      if (roleError) throw roleError;
 
       await loadData();
-      alert('Leading teacher removed successfully');
+      alert('Leading teacher downgraded to teacher successfully. All data preserved.');
     } catch (error) {
-      console.error('Error removing leading teacher:', error);
-      alert('Failed to remove leading teacher');
+      console.error('Error downgrading leading teacher:', error);
+      alert('Failed to downgrade leading teacher');
     }
   };
 
@@ -1673,10 +1673,11 @@ export function PrincipalDashboard() {
                         e.stopPropagation();
                         handleRemoveLeadingTeacher(group.leadingTeacher.id);
                       }}
-                      className="p-2 hover:bg-red-600 rounded-lg transition ml-2"
-                      title="Remove leading teacher"
+                      className="flex items-center gap-1 px-3 py-1.5 text-sm bg-amber-500 hover:bg-amber-600 rounded-lg transition ml-2 font-medium"
+                      title="Downgrade to regular teacher"
                     >
-                      <Trash2 className="w-5 h-5" />
+                      <RefreshCw className="w-4 h-4" />
+                      Downgrade
                     </button>
                   </div>
                 </div>
@@ -1687,14 +1688,27 @@ export function PrincipalDashboard() {
                       <h3 className="font-semibold text-slate-800 mb-3">Teachers</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                         {group.teachers.map(teacher => (
-                          <div key={teacher.id} className="flex items-center gap-3 p-3 bg-gradient-to-br from-blue-50 to-sky-100 rounded-lg">
-                            <div className="bg-sky-600 text-white w-10 h-10 rounded-full flex items-center justify-center font-medium">
-                              {teacher.full_name.charAt(0)}
+                          <div key={teacher.id} className="flex items-center justify-between p-3 bg-gradient-to-br from-blue-50 to-sky-100 rounded-lg">
+                            <div className="flex items-center gap-3">
+                              <div className="bg-sky-600 text-white w-10 h-10 rounded-full flex items-center justify-center font-medium">
+                                {teacher.full_name.charAt(0)}
+                              </div>
+                              <div>
+                                <p className="font-medium text-slate-800">{teacher.full_name}</p>
+                                <p className="text-sm text-slate-600">{teacher.email}</p>
+                              </div>
                             </div>
-                            <div>
-                              <p className="font-medium text-slate-800">{teacher.full_name}</p>
-                              <p className="text-sm text-slate-600">{teacher.email}</p>
-                            </div>
+                            <button
+                              onClick={() => {
+                                setSelectedTeacherForPromotion(teacher.id);
+                                setShowAddLeadingTeacherModal(true);
+                              }}
+                              className="flex items-center gap-1 px-2 py-1 text-xs bg-sky-600 hover:bg-sky-700 text-white rounded-lg transition font-medium"
+                              title="Promote to Leading Teacher"
+                            >
+                              <RefreshCw className="w-3 h-3" />
+                              Promote
+                            </button>
                           </div>
                         ))}
                       </div>
