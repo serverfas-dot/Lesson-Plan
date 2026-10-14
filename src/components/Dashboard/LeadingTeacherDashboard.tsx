@@ -160,21 +160,21 @@ export function LeadingTeacherDashboard() {
     const grouped = new Map<string, { label: string; plans: LessonPlanWithTeacher[]; color: string }>();
 
     const draft = plans.filter(p => p.status === 'draft');
-    const pending = plans.filter(p => p.principal_status === 'pending' && p.status === 'submitted');
-    const approved = plans.filter(p => p.principal_status === 'approved');
-    const needsRevision = plans.filter(p => p.principal_status === 'needs_revision');
+    const pending = plans.filter(p => p.status === 'submitted');
+    const approved = plans.filter(p => p.status === 'approved');
+    const rejected = plans.filter(p => p.status === 'rejected');
 
     if (draft.length > 0) {
       grouped.set('draft', { label: 'Draft Plans', plans: draft, color: 'blue' });
     }
     if (pending.length > 0) {
-      grouped.set('pending', { label: 'Pending Principal Approval', plans: pending, color: 'amber' });
+      grouped.set('pending', { label: 'Submitted Plans', plans: pending, color: 'amber' });
     }
     if (approved.length > 0) {
-      grouped.set('approved', { label: 'Approved by Principal', plans: approved, color: 'green' });
+      grouped.set('approved', { label: 'Approved Plans', plans: approved, color: 'green' });
     }
-    if (needsRevision.length > 0) {
-      grouped.set('needs_revision', { label: 'Needs Revision', plans: needsRevision, color: 'red' });
+    if (rejected.length > 0) {
+      grouped.set('rejected', { label: 'Rejected Plans', plans: rejected, color: 'red' });
     }
 
     return grouped;
@@ -202,7 +202,7 @@ export function LeadingTeacherDashboard() {
         .select(`*, teacher:profiles!lesson_plans_teacher_id_fkey(*)`)
         .eq('teacher_id', profile.id)
         .order('submitted_at', { ascending: false })
-        .limit(100);
+        .limit(2000);
 
       const assignedPlansQuery = tIds.length > 0
         ? supabase
