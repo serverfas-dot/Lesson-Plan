@@ -197,29 +197,26 @@ export function LeadingTeacherDashboard() {
       const tIds = (teachersData || []).map(t => t.id);
       setTeacherIds(tIds);
 
-      if (tIds.length === 0) {
-        setLessonPlans([]);
-        setMyLessonPlans([]);
-        setStats({ pending: 0, approved: 0, total: 0 });
-        setIsLoadingPlans(false);
-        return;
-      }
+      const myPlansQuery = supabase
+        .from('lesson_plans')
+        .select(`*, teacher:profiles!lesson_plans_teacher_id_fkey(*)`)
+        .eq('teacher_id', profile.id)
+        .order('submitted_at', { ascending: false })
+        .limit(100);
+
+      const assignedPlansQuery = tIds.length > 0
+        ? supabase
+            .from('lesson_plans')
+            .select(lessonPlanListSelect)
+            .in('teacher_id', tIds)
+            .neq('status', 'draft')
+            .order('date', { ascending: false })
+            .limit(2000)
+        : Promise.resolve({ data: [], error: null });
 
       const [{ data: myPlansData, error: myPlansError }, { data: assignedPlans, error: assignedPlansError }] = await Promise.all([
-        supabase
-          .from('lesson_plans')
-          .select(`*, teacher:profiles!lesson_plans_teacher_id_fkey(*)`)
-          .eq('teacher_id', profile.id)
-          .eq('created_by_role', 'leading_teacher')
-          .order('submitted_at', { ascending: false })
-          .limit(100),
-        supabase
-          .from('lesson_plans')
-          .select(lessonPlanListSelect)
-          .in('teacher_id', tIds)
-          .neq('status', 'draft')
-          .order('date', { ascending: false })
-          .limit(2000)
+        myPlansQuery,
+        assignedPlansQuery
       ]);
 
       if (myPlansError) throw myPlansError;
