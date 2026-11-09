@@ -130,6 +130,9 @@ export function PrincipalDashboard() {
     return grouped;
   };
 
+  const getGroupLeader = (leadingTeacherId: string, plans: LessonPlanWithDetails[]) =>
+    allTeachers.find(t => t.id === leadingTeacherId) ?? plans[0]?.teacher;
+
   function getWeekStart(date: Date): Date {
     const d = new Date(date);
     const day = d.getDay();
@@ -207,7 +210,8 @@ export function PrincipalDashboard() {
       const [
         { data: leadingTeachers, error: ltError },
         { data: allTeachers, error: teachersError },
-        { data: allPlans, error: plansError }
+        { data: recentPlans, error: plansError },
+        { data: submittedPlans, error: submittedError }
       ] = await Promise.all([
         supabase
           .from('profiles')
@@ -226,12 +230,23 @@ export function PrincipalDashboard() {
           .select(lessonPlanListSelect)
           .neq('status', 'draft')
           .order('date', { ascending: false })
-          .limit(500)
+          .limit(2000),
+
+        supabase
+          .from('lesson_plans')
+          .select(lessonPlanListSelect)
+          .eq('status', 'submitted')
+          .order('date', { ascending: false })
       ]);
 
       if (ltError) throw ltError;
       if (teachersError) throw teachersError;
       if (plansError) throw plansError;
+      if (submittedError) throw submittedError;
+
+      const planMap = new Map<string, any>();
+      [...(submittedPlans || []), ...(recentPlans || [])].forEach(p => planMap.set(p.id, p));
+      const allPlans = Array.from(planMap.values());
 
       // Group data by leading teacher — use the teacher's current leading_teacher_id
       // from their profile, not the potentially stale leading_teacher_id on the lesson plan
@@ -306,7 +321,7 @@ export function PrincipalDashboard() {
         query = query.eq('week', parseInt(selectedWeek));
       }
 
-      const { data, error } = await query.order('date', { ascending: false }).limit(500);
+      const { data, error } = await query.order('date', { ascending: false }).limit(2000);
 
       if (error) throw error;
 
@@ -667,7 +682,9 @@ export function PrincipalDashboard() {
   // Approved = plans approved BY PRINCIPAL (status = 'approved')
   const teacherPendingPlans = groups.reduce((sum, g) => sum + g.lessonPlans.filter(p => p.status === 'submitted').length, 0);
   const teacherApprovedPlans = groups.reduce((sum, g) => sum + g.lessonPlans.filter(p => p.status === 'approved').length, 0);
-  const ltPendingPlans = leadingTeacherPlans.filter(p => p.status === 'submitted').length;
+  const ltPendingPlans = leadingTeacherPlans.filter(
+    p => p.status === 'submitted' && (p.principal_status === 'pending' || !p.principal_status)
+  ).length;
   const ltApprovedPlans = leadingTeacherPlans.filter(p => p.status === 'approved').length;
   const pendingPlans = teacherPendingPlans + ltPendingPlans;
   const approvedPlans = teacherApprovedPlans + ltApprovedPlans;
@@ -688,7 +705,8 @@ export function PrincipalDashboard() {
         </div>
         <div className="max-w-7xl mx-auto px-6 py-8">
           <LessonPlanView lessonPlan={selectedPlan} />
-          {selectedPlan.principal_status === 'pending' && (
+          {selectedPlan.status === 'submitted' &&
+            (selectedPlan.principal_status === 'pending' || !selectedPlan.principal_status) && (
             <div className="mt-6 grid grid-cols-3 gap-3">
               <button
                 onClick={() => setShowApprovalModal(true)}
@@ -810,6 +828,13 @@ export function PrincipalDashboard() {
       </div>
     );
   }
+
+  const isLeadingTeacherPlan = (plan: LessonPlanWithDetails) =>
+    allTeachers.some(t => t.id === plan.teacher_id && t.role === 'leading_teacher');
+
+  const isAwaitingPrincipalApproval = (plan: LessonPlanWithDetails) =>
+    plan.status === 'submitted' && isLeadingTeacherPlan(plan) &&
+    (plan.principal_status === 'pending' || !plan.principal_status);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-sky-100">
@@ -1268,15 +1293,15 @@ export function PrincipalDashboard() {
               </div>
             )}
 
-            {leadingTeacherPlans.filter(p => p.status === 'submitted').length > 0 && (
+            {leadingTeacherPlans.filter(isAwaitingPrincipalApproval).length > 0 && (
               <div className="bg-white rounded-lg border border-slate-200 p-6">
                 <h2 className="text-xl font-semibold text-slate-800 mb-4">Pending Approval - By Leading Teacher</h2>
                 <div className="grid gap-3">
-                  {Array.from(groupPlansByLeadingTeacher(leadingTeacherPlans.filter(p => p.status === 'submitted'))).map(([leadingTeacherId, ltPlans]) => {
-                    const leadingTeacher = ltPlans[0]?.leading_teacher || ltPlans[0]?.teacher;
+                  {Array.from(groupPlansByLeadingTeacher(leadingTeacherPlans.filter(isAwaitingPrincipalApproval))).map(([leadingTeacherId, ltPlans]) => {
+                    const leadingTeacher = getGroupLeader(leadingTeacherId, ltPlans);
                     if (!leadingTeacher) return null;
                     const isExpanded = expandedLeadingTeachers.has(leadingTeacherId);
-                    const pendingCount = ltPlans.filter(p => p.status === 'submitted').length;
+                    const pendingCount = ltPlans.length;
 
                     return (
                       <div key={leadingTeacherId} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
@@ -1353,7 +1378,7 @@ export function PrincipalDashboard() {
                 <h2 className="text-xl font-semibold text-slate-800 mb-4">Approved Plans - By Principal</h2>
                 <div className="grid gap-3">
                   {Array.from(groupPlansByLeadingTeacher(leadingTeacherPlans.filter(p => p.status === 'approved' && p.principal_status === 'approved'))).map(([leadingTeacherId, ltPlans]) => {
-                    const leadingTeacher = ltPlans[0]?.leading_teacher || ltPlans[0]?.teacher;
+                    const leadingTeacher = getGroupLeader(leadingTeacherId, ltPlans);
                     if (!leadingTeacher) return null;
 
                     const isExpanded = expandedLeadingTeachers.has(leadingTeacherId);
@@ -1542,7 +1567,7 @@ export function PrincipalDashboard() {
                 <div className="grid gap-3">
                   {Array.from(groupPlansByLeadingTeacher(filteredLeadingTeacherPlans)).map(([leadingTeacherId, ltPlans]) => {
                     // For leading teacher's own plans, leading_teacher is null, so use teacher
-                    const leadingTeacher = ltPlans[0]?.leading_teacher || ltPlans[0]?.teacher;
+                    const leadingTeacher = getGroupLeader(leadingTeacherId, ltPlans);
                     if (!leadingTeacher) return null;
 
                     const isExpanded = expandedLeadingTeachers.has(leadingTeacherId);
